@@ -2,7 +2,7 @@
 
 Aplicación académica en Python y Streamlit para explorar transacciones de ventas, clasificar demanda semanal, agrupar productos y generar alertas orientativas comparando demanda reciente con el stock actual ingresado por el usuario.
 
-> Prototipo académico: la demo utiliza datos sintéticos. El dataset real de Mendeley descrito abajo todavía no está integrado ni incluido en el repositorio. No se deben interpretar las métricas de la demo como resultados del dataset real.
+> Prototipo académico: conserva demo sintética, carga propia y modo integrado con los CSV reales de Mendeley (los originales no se incluyen en Git). Las métricas de esta revisión son una ejecución local de los CSV disponibles, no una validación empresarial.
 
 ## Problema y alcance
 
@@ -21,7 +21,7 @@ Preparar transacciones de ventas y ofrecer análisis reproducibles de clasificac
 - Captura/importación de stock actual y descarga de alertas CSV.
 - Navegación lateral Streamlit y exportación CSV.
 
-En la verificación actual con Python 3.12.10, **31 pruebas pasaron**, `pip check` no encontró conflictos y `compileall` terminó sin errores. pytest informó 14 advertencias deprecadas de Matplotlib/pyparsing.
+En esta revisión con el entorno `.venv` local, **43 pruebas pasaron** (14 advertencias deprecadas de Matplotlib/pyparsing); `pip check` no encontró conflictos y `compileall` terminó sin errores. La suite incluye comprobaciones con los dos CSV reales disponibles localmente.
 
 ## Tecnologías
 
@@ -60,16 +60,27 @@ El repositorio está preparado para Community Cloud: la aplicación de entrada e
 2. Elige **Create app** y selecciona ese repositorio, la rama `main` y el archivo principal `app.py`.
 3. En **Advanced settings**, selecciona Python **3.12** si la plataforma ofrece el selector de versión. No se añade `runtime.txt`: la selección se realiza en la configuración de la aplicación y se evita fijar un archivo de runtime antiguo.
 4. Pulsa **Deploy**. Espera a que termine la instalación de `requirements.txt` y el arranque. Si falla, abre **Manage app** y consulta los logs antes de cambiar dependencias.
-5. Abre la URL `.streamlit.app` que asigne la plataforma y comprueba el panel con **Demostración**. Para probar datos propios, cambia a **Cargar archivo**; el repositorio no trae datos reales.
+5. Abre la URL `.streamlit.app` asignada y comprueba el panel con **Demostración**. El modo Mendeley necesita ambos CSV locales o cargados en la interfaz; el repositorio no los incluye.
 
 No se requieren secretos de Streamlit ni variables de entorno para el funcionamiento actual. La aplicación procesa archivos cargados en memoria y ofrece salidas descargables; evita cargar información personal o confidencial en una aplicación pública. El inicio local y las pruebas automatizadas no certifican disponibilidad, rendimiento o compatibilidad en producción; esas condiciones solo pueden confirmarse tras desplegar y probar la URL asignada.
 
-## Dataset
+## Dataset real y resultados medidos
 
-La fuente elegida para la siguiente integración es [Retail Transactions and Stocks Data](https://data.mendeley.com/datasets/27x8mjm8k4/1), versión 1, DOI [10.17632/27x8mjm8k4.1](https://doi.org/10.17632/27x8mjm8k4.1). Mendeley publica los archivos `retail_sales_ml_apl.csv` (37.3 MB) y `retail_inventory_ml_apl.csv` (95.4 MB), y describe una muestra de 40 tiendas, 2,326 SKU y tres divisiones. La ficha indica ventas transaccionales diarias y stock disponible (“On hand”), pero no se han podido verificar las columnas, el periodo de observaciones, la granularidad exacta del inventario ni la relación temporal entre ambos archivos. Por ello, esta versión todavía no integra el dataset real ni genera resultados basados en él.
+La aplicación integra [Retail Transactions and Stocks Data](https://data.mendeley.com/datasets/27x8mjm8k4/1), versión 1, DOI [10.17632/27x8mjm8k4.1](https://doi.org/10.17632/27x8mjm8k4.1), de Jimmy Smith. La ficha describe una muestra de 40 tiendas, 2,326 SKU y tres divisiones. La inspección local encontró 125,751 registros de ventas agregados (118,258 positivos usados para demanda), del 2025-06-01 al 2026-04-24, y 284,755 intervalos de inventario; 22,701 tienen fin abierto (`9999-12-31`). Detalles y limitaciones: [data/README.md](data/README.md).
 
-Para preparar una inspección local, descarga ambos CSV desde **Download All** en la ficha oficial y colócalos en `data/raw/` con esos nombres exactos. Esa carpeta y sus archivos están excluidos de Git; no subas los CSV a GitHub. Tras inspeccionarlos se podrá establecer un mapeo de columnas y validar fechas, claves y reglas de limpieza antes de habilitar su uso. Mientras tanto, la aplicación conserva su modo de demostración y la carga genérica actual, cuyo esquema requerido es `InvoiceDate`, `StockCode`, `Quantity` y `UnitPrice`; no se afirma que los archivos Mendeley tengan esas columnas.
+Ejecución medida con los CSV locales y una división cronológica por fecha (entrenamiento: 54,694 filas hasta 2026-02-09; prueba: 12,697 desde 2026-02-16):
 
+| Modelo | Accuracy | Precision macro | Recall macro | F1 macro |
+|---|---:|---:|---:|---:|
+| Árbol de Decisión | 0.504922 | 0.480136 | 0.499123 | 0.479097 |
+| KNN | 0.468300 | 0.446650 | 0.462113 | 0.424771 |
+| MLP | 0.426636 | 0.420194 | 0.423812 | 0.415436 |
+
+Las clases Baja/Media/Alta se construyen con cuantiles globales de cantidad semanal. Es una comparación exploratoria, no un pronóstico validado ni una validación cruzada temporal. En una corrida de clustering sobre 2,326 perfiles, silhouette fue 0.534953 para K-Means y 0.759648 para Ward con 3 grupos; mide separación geométrica, no valor de negocio.
+
+Hay 7,491 devoluciones con cantidades negativas. Se conservan en calidad y resúmenes netos, y se excluyen de demanda, modelos y alertas. No se especifican moneda ni unidades físicas. El inventario solo se asocia por producto, tienda, canal y fecha cuando existe exactamente un intervalo compatible: 85,461 ventas positivas encontraron uno, 32,797 no y ninguna tuvo varios. El momento de medición de `Qty on hand` no está documentado; las alertas son orientativas y no prueban roturas de stock.
+
+Coloca los originales en `data/raw/retail_sales_ml_apl.csv` y `data/raw/retail_inventory_ml_apl.csv`. Esa carpeta está excluida de Git. Se conserva la demo sintética, la carga propia y la opción Mendeley local o por interfaz. Los archivos grandes se cachean.
 ## Estructura
 
 ```text
@@ -87,7 +98,7 @@ setup_windows.bat       Configuración guiada en Windows
 
 - Clasificación: KNN, Árbol de Decisión, MLP.
 - Agrupamiento: K-Means y jerárquico Ward sobre variables de producto escaladas.
-- Alertas: media de las últimas cuatro semanas calendario comparada con stock actual; no usa los modelos de clasificación.
+- Alertas: con Mendeley compara las ventas de cuatro semanas calendario completas con `Qty on hand` de un único intervalo compatible. Los casos sin relación, con cero o con cantidad negativa se señalan sin afirmar rotura de stock. Para archivos propios se conserva el ingreso manual de stock.
 
 KNN clasifica por vecinos cercanos; el árbol usa reglas sucesivas; el MLP es una red multicapa. K-Means asigna productos a centroides; Ward combina grupos jerárquicamente. Estos métodos son exploratorios y no han sido validados en una empresa.
 
@@ -105,15 +116,14 @@ Resultados y limitaciones del entorno usado para auditoría: ver [Documentación
 
 ## Limitaciones conocidas
 
-El dataset de Mendeley está seleccionado, pero su esquema y periodo aún no se han inspeccionado y no está integrado. No hay ventas reales incluidas, evaluación empresarial, validación temporal repetida ni guardado/carga de modelos. Ventas observadas pueden ocultar demanda durante quiebres. La clasificación usa una sola partición cronológica y clases relativas a cuantiles. La alerta actual no considera estacionalidad, plazos de entrega, compras en tránsito ni stock de seguridad; compara ventas recientes con stock ingresado manualmente. K se escoge manualmente.
-
+El conjunto es una muestra estratificada. No se especifican moneda ni unidades físicas, los motivos de devolución están vacíos y la temporización de `Qty on hand` dentro de sus intervalos no está descrita. Hay huecos temporales, cantidades de stock negativas y ventas sin intervalo compatible. Las ventas observadas no identifican demanda no atendida y las alertas no confirman roturas. La clasificación usa cuantiles relativos y una única división cronológica; no hay validación temporal repetida ni evaluación empresarial. No se guardan modelos entrenados. El análisis de clustering es descriptivo, y K se selecciona en la interfaz. Las alertas no consideran plazos de reposición, compras en tránsito, estacionalidad o stock de seguridad.
 ## Créditos y licencia
 
 La fuente objetivo para datos es [Retail Transactions and Stocks Data](https://data.mendeley.com/datasets/27x8mjm8k4/1), de Jimmy Smith, versión 1 (2026), DOI [10.17632/27x8mjm8k4.1](https://doi.org/10.17632/27x8mjm8k4.1). La ficha declara CC BY 4.0; si se usan esos datos, se debe conservar la atribución y señalar modificaciones. Los CSV no se incluyen en este repositorio. No se ha definido una licencia para el código y no se incluye `LICENSE`; la visibilidad pública del repositorio no concede por sí sola permisos de copia, modificación o redistribución del código.
 
 ## Documentación
 
-- [Datos y pasos para la integración pendiente](data/README.md)
+- [Datos reales: esquema, integración, ejecución y límites](data/README.md)
 - [Informe académico](docs/INFORME_ACADEMICO.md)
 - [Documentación técnica](docs/DOCUMENTACION_TECNICA.md)
 - [Metodología de Machine Learning](docs/METODOLOGIA_MACHINE_LEARNING.md)

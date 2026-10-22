@@ -78,7 +78,7 @@ def test_valid_uploaded_files_load_and_show_data_quality(extension):
         mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
     at = run_app()
-    at.radio[0].set_value("Cargar archivo").run(timeout=30)
+    at.radio[0].set_value("Archivo propio").run(timeout=30)
     at.file_uploader[0].upload(f"ventas.{extension}", content, mime).run(timeout=30)
     assert not at.exception
     assert any("Datos cargados" in success.value for success in at.success)

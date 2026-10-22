@@ -13,21 +13,31 @@ CLUSTER_FEATURES = ["units", "revenue", "orders", "active_weeks", "weekly_mean",
 
 def product_summary(data: pd.DataFrame) -> pd.DataFrame:
     """Construye una fila por producto; media/desviación usan totales semanales."""
-    required = {"InvoiceDate", "StockCode", "Quantity", "UnitPrice"}
+    required = {"InvoiceDate", "StockCode", "Quantity"}
     missing = required.difference(data.columns)
+    if "Revenue" not in data.columns and "UnitPrice" not in data.columns:
+        missing.add("Revenue o UnitPrice")
     if missing:
         raise ValueError("Faltan columnas para segmentar: " + ", ".join(sorted(missing)))
     frame = data.copy()
     frame["InvoiceDate"] = pd.to_datetime(frame["InvoiceDate"], errors="coerce")
     frame["Quantity"] = pd.to_numeric(frame["Quantity"], errors="coerce")
-    frame["UnitPrice"] = pd.to_numeric(frame["UnitPrice"], errors="coerce")
-    frame = frame.dropna(subset=["InvoiceDate", "StockCode", "Quantity", "UnitPrice"])
-    frame = frame.loc[(frame.Quantity > 0) & (frame.UnitPrice >= 0)].copy()
+    if "Revenue" in frame.columns:
+        frame["Revenue"] = pd.to_numeric(frame["Revenue"], errors="coerce")
+    else:
+        frame["UnitPrice"] = pd.to_numeric(frame["UnitPrice"], errors="coerce")
+        frame["Revenue"] = frame["Quantity"] * frame["UnitPrice"]
+    frame = frame.dropna(subset=["InvoiceDate", "StockCode", "Quantity", "Revenue"])
+    frame = frame.loc[(frame.Quantity > 0) & (frame.Revenue >= 0)].copy()
     if frame.empty:
         raise ValueError("No hay ventas válidas para resumir productos.")
     frame["Week"] = frame["InvoiceDate"].dt.to_period("W-SUN").dt.start_time
-    frame["Revenue"] = frame["Quantity"] * frame["UnitPrice"]
-    order_aggregation = ("InvoiceNo", "nunique") if "InvoiceNo" in frame else ("Quantity", "size")
+    if "InvoiceNo" in frame:
+        order_aggregation = ("InvoiceNo", "nunique")
+    elif "TransactionCount" in frame:
+        order_aggregation = ("TransactionCount", "sum")
+    else:
+        order_aggregation = ("Quantity", "size")
     summary = frame.groupby("StockCode", as_index=False).agg(
         units=("Quantity", "sum"), revenue=("Revenue", "sum"),
         orders=order_aggregation, active_weeks=("Week", "nunique"))
