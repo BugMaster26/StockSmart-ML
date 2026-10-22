@@ -31,7 +31,9 @@ def test_demo_app_has_lateral_navigation_and_main_dashboard():
     assert not at.exception
     assert {radio.label for radio in at.radio} == {"Origen", "Navegación"}
     assert any("DEMOSTRACIÓN" in warning.value for warning in at.warning)
-    assert len(at.metric) == 4
+    dashboard_kpis = next(block.value for block in at.markdown if "<article class=\"dashboard-kpi" in block.value)
+    assert all(label in dashboard_kpis for label in ("Ingresos", "Unidades vendidas", "Productos", "Registros válidos"))
+    assert all(value in dashboard_kpis for value in ("207,736.60", "28,223", "12", "2,013"))
 
 
 def test_demo_navigation_opens_models_clustering_and_inventory_pages():

@@ -175,22 +175,49 @@ def cached_mendeley_upload(sales_name: str, sales_bytes: bytes,
     return dataset
 
 
+def render_dashboard_kpis(items: list[tuple[str, str, str, str]]) -> None:
+    """Renderiza los indicadores recibidos sin recalcular ni transformar sus valores."""
+    cards = []
+    for label, value, icon, accent in items:
+        cards.append(
+            f'<article class="dashboard-kpi dashboard-kpi--{accent}">'
+            f'<span class="dashboard-kpi-icon" aria-hidden="true">{html.escape(icon)}</span>'
+            f'<span class="dashboard-kpi-label">{html.escape(label)}</span>'
+            f'<strong class="dashboard-kpi-value">{html.escape(value)}</strong>'
+            "</article>"
+        )
+    st.markdown(f'<div class="dashboard-kpi-grid">{"".join(cards)}</div>', unsafe_allow_html=True)
+
+
+def render_source_pill(origin_label: str) -> None:
+    st.markdown(
+        '<div class="data-source-pill"><span class="data-source-kicker">FUENTE ACTIVA</span>'
+        f'<span class="data-source-value">{html.escape(origin_label)}</span></div>',
+        unsafe_allow_html=True,
+    )
+
+
 def show_panel(clean: pd.DataFrame, report, origin_label: str, dataset: MendeleyDataset | None = None) -> None:
     render_section_intro("Resumen de ventas", "Indicadores y evolución de las ventas del origen seleccionado.")
-    st.caption(f"Fuente activa · {origin_label}")
+    render_source_pill(origin_label)
+    if origin_label.startswith("DEMOSTRACIÓN"):
+        st.warning("DEMOSTRACIÓN: datos sintéticos generados localmente; no son resultados de ventas reales.")
+    elif dataset:
+        st.success("Dataset Mendeley real seleccionado. Ventas positivas, devoluciones e inventario se tratan por separado.")
+    else:
+        st.success("Datos cargados y procesados desde el archivo seleccionado.")
+
     if dataset:
         sale_quality = dataset.quality["sales"]
-        with st.container(border=True):
-            st.markdown("#### Indicadores del conjunto")
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Ventas brutas*", f"{sale_quality['gross_sales_amount']:,.2f}")
-            col2.metric("Cantidad vendida*", f"{sale_quality['gross_units_positive_sales']:,.0f}")
-            col3.metric("Productos", f"{sale_quality['products']:,}")
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Tiendas", f"{sale_quality['stores']:,}")
-            col2.metric("Transacciones reportadas", f"{int(clean.TransactionCount.sum()):,}")
-            col3.metric("Filas marcadas devolución", f"{sale_quality['return_rows_excluded_from_demand']:,}")
-            st.caption(f"Ventas cubiertas: {sale_quality['date_min']} – {sale_quality['date_max']}.")
+        render_dashboard_kpis([
+            ("Ventas brutas*", f"{sale_quality['gross_sales_amount']:,.2f}", "↗", "teal"),
+            ("Cantidad vendida*", f"{sale_quality['gross_units_positive_sales']:,.0f}", "▦", "blue"),
+            ("Productos", f"{sale_quality['products']:,}", "◈", "violet"),
+            ("Tiendas", f"{sale_quality['stores']:,}", "⌖", "teal"),
+            ("Transacciones reportadas", f"{int(clean.TransactionCount.sum()):,}", "▤", "blue"),
+            ("Filas marcadas devolución", f"{sale_quality['return_rows_excluded_from_demand']:,}", "↩", "violet"),
+        ])
+        st.caption(f"Ventas cubiertas: {sale_quality['date_min']} – {sale_quality['date_max']}.")
         st.caption(
             f"*Campos monetarios y cantidades tal como aparecen en el dataset; no se especifican moneda ni unidad física. "
             f"Devoluciones: {sale_quality['return_units_abs']:,.0f} cantidades y "
@@ -198,22 +225,28 @@ def show_panel(clean: pd.DataFrame, report, origin_label: str, dataset: Mendeley
             f"Monto neto reportado por el archivo: {sale_quality['net_sales_amount_reported']:,.2f}."
         )
     else:
-        with st.container(border=True):
-            st.markdown("#### Indicadores del conjunto")
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Ingresos", f"{clean.Revenue.sum():,.2f}")
-            col2.metric("Unidades vendidas", f"{clean.Quantity.sum():,.0f}")
-            col3.metric("Productos", f"{clean.StockCode.nunique():,}")
-            col4.metric("Registros válidos", f"{len(clean):,}")
+        render_dashboard_kpis([
+            ("Ingresos", f"{clean.Revenue.sum():,.2f}", "↗", "teal"),
+            ("Unidades vendidas", f"{clean.Quantity.sum():,.0f}", "▦", "blue"),
+            ("Productos", f"{clean.StockCode.nunique():,}", "◈", "violet"),
+            ("Registros válidos", f"{len(clean):,}", "✓", "teal"),
+        ])
+
     weekly = (clean.assign(Semana=clean.InvoiceDate.dt.to_period("W-SUN").dt.start_time)
               .groupby("Semana").Revenue.sum())
-    with st.container(border=True):
+    with st.container(key="dashboard-weekly-chart"):
         st.subheader("Ingresos por semana")
         st.caption("Evolución agregada a partir de las ventas procesadas.")
-        st.line_chart(weekly.rename("Ingresos"), y_label=("Monto reportado (moneda no indicada)" if dataset else "Ingresos"), width="stretch")
+        st.line_chart(
+            weekly.rename("Ingresos"),
+            y_label=("Monto reportado (moneda no indicada)" if dataset else "Ingresos"),
+            color=THEME_COLORS.get("--ss-accent", "#2DD4BF"),
+            width="stretch",
+            height=360,
+        )
     if dataset:
         sale_quality = dataset.quality["sales"]
-        st.write(
+        st.caption(
             f"Preprocesamiento: {sale_quality['rows']:,} filas fuente; "
             f"{sale_quality['positive_sales_rows_retained']:,} ventas positivas usadas; "
             f"{sale_quality['return_rows_excluded_from_demand']:,} devoluciones separadas; "
@@ -222,19 +255,31 @@ def show_panel(clean: pd.DataFrame, report, origin_label: str, dataset: Mendeley
         )
         products = clean.groupby("StockCode", as_index=False).agg(Quantity=("Quantity", "sum"), Revenue=("Revenue", "sum"))
         stores = clean.groupby("Store", as_index=False).agg(Quantity=("Quantity", "sum"), Revenue=("Revenue", "sum"))
-        left, right = st.columns(2)
-        with left:
-            with st.container(border=True):
-                st.subheader("10 productos con más cantidad registrada")
-                st.bar_chart(products.nlargest(10, "Quantity").set_index("StockCode")["Quantity"])
-        with right:
-            with st.container(border=True):
-                st.subheader("Ventas por tienda")
-                st.bar_chart(stores.set_index("Store")["Revenue"])
+        st.markdown('<div class="dashboard-subsection-title">Distribución y análisis complementario</div>', unsafe_allow_html=True)
+        with st.container(key="dashboard-supporting-products"):
+            st.subheader("10 productos con más cantidad registrada")
+            st.caption("Cantidad acumulada por producto.")
+            st.bar_chart(
+                products.nlargest(10, "Quantity").set_index("StockCode")["Quantity"],
+                color=THEME_COLORS.get("--ss-blue", "#3B82F6"),
+                horizontal=True,
+                width="stretch",
+                height=360,
+            )
+        with st.container(key="dashboard-supporting-stores"):
+            st.subheader("Ventas por tienda")
+            st.caption("Monto registrado en cada tienda.")
+            st.bar_chart(
+                stores.set_index("Store")["Revenue"],
+                color=THEME_COLORS.get("--ss-violet", "#8B5CF6"),
+                horizontal=True,
+                width="stretch",
+                height=max(420, min(1000, 110 + 18 * len(stores))),
+            )
     else:
-        st.write(f"Preprocesamiento: {report.rows_input:,} filas de entrada, {report.rows_output:,} filas válidas, "
-                 f"{report.duplicate_rows:,} duplicados detectados, {report.cancellation_rows:,} cancelaciones y "
-                 f"{report.negative_quantity_rows:,} filas con cantidades negativas.")
+        st.caption(f"Preprocesamiento: {report.rows_input:,} filas de entrada, {report.rows_output:,} filas válidas, "
+                   f"{report.duplicate_rows:,} duplicados detectados, {report.cancellation_rows:,} cancelaciones y "
+                   f"{report.negative_quantity_rows:,} filas con cantidades negativas.")
 
 
 def show_data_page(raw: pd.DataFrame, clean: pd.DataFrame, report, dataset: MendeleyDataset | None = None) -> None:
@@ -790,18 +835,14 @@ if clean.empty:
     st.error("El archivo no contiene ventas válidas después del preprocesamiento. Revisa columnas, fechas, cantidades y precios.")
     st.stop()
 
-if source == "Demostración":
-    st.warning("DEMOSTRACIÓN: datos sintéticos generados localmente; no son resultados de ventas reales.")
-elif dataset:
-    st.success("Dataset Mendeley real seleccionado. Ventas positivas, devoluciones e inventario se tratan por separado.")
-else:
-    st.success("Datos cargados y procesados desde el archivo seleccionado.")
-
-st.markdown(
-    '<div class="data-source-pill"><span class="data-source-kicker">FUENTE ACTIVA</span>'
-    f'<span class="data-source-value">{html.escape(origin)}</span></div>',
-    unsafe_allow_html=True,
-)
+if section != "Panel principal":
+    if source == "Demostración":
+        st.warning("DEMOSTRACIÓN: datos sintéticos generados localmente; no son resultados de ventas reales.")
+    elif dataset:
+        st.success("Dataset Mendeley real seleccionado. Ventas positivas, devoluciones e inventario se tratan por separado.")
+    else:
+        st.success("Datos cargados y procesados desde el archivo seleccionado.")
+    render_source_pill(origin)
 
 if section == "Panel principal":
     show_panel(clean, cleaning_report, origin, dataset)
