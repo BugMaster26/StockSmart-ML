@@ -2,13 +2,17 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import io
 import logging
+import re
 import time
 import zipfile
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from cycler import cycler
+from matplotlib.colors import LinearSegmentedColormap
 import pandas as pd
 import streamlit as st
 
@@ -22,22 +26,83 @@ from src.preprocessing import clean_transactions, make_demo_data
 
 st.set_page_config(page_title="StockSmart ML", page_icon="📦", layout="wide")
 logger = logging.getLogger(__name__)
+THEME_COLORS: dict[str, str] = {}
+CLUSTER_COLOR_MAP = None
 
 
 def render_section_intro(title: str, description: str) -> None:
     """Presenta un título y una explicación breve sin alterar el flujo de datos."""
+    st.markdown('<div class="section-eyebrow">STOCKSMART ML · ANALÍTICA</div>', unsafe_allow_html=True)
     st.subheader(title)
     st.caption(description)
 
 
+def render_data_workflow(active_step: int) -> None:
+    """Hace visible el recorrido de datos sin introducir controles ni cambiar su flujo."""
+    steps = ["Elegir fuente", "Cargar datos", "Validar calidad", "Explorar resultados"]
+    columns = st.columns(len(steps))
+    for index, (column, label) in enumerate(zip(columns, steps), start=1):
+        state = "done" if index < active_step else "active" if index == active_step else "upcoming"
+        with column:
+            st.markdown(
+                f'<div class="workflow-step {state}"><span class="workflow-number">{index}</span>'
+                f'<span class="workflow-label">{label}</span></div>',
+                unsafe_allow_html=True,
+            )
+
+
 def apply_visual_styles() -> None:
     """Carga estilos locales de presentación; no añade dependencias ni cambia controles."""
+    global CLUSTER_COLOR_MAP
     stylesheet = Path(__file__).resolve().parent / "assets" / "theme.css"
     if stylesheet.is_file():
-        st.markdown(f"<style>{stylesheet.read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
+        css = stylesheet.read_text(encoding="utf-8")
+        THEME_COLORS.update(dict(re.findall(r"(--ss-[\w-]+):\s*(#[0-9A-Fa-f]{6})", css)))
+        def color(token: str) -> str:
+            return THEME_COLORS[f"--ss-{token}"]
+
+        chart_palette = [color(token) for token in ("accent", "info", "success", "warning", "error")]
+        CLUSTER_COLOR_MAP = LinearSegmentedColormap.from_list("stocksmart_groups", chart_palette)
+        if "stocksmart_groups" not in plt.colormaps:
+            plt.colormaps.register(CLUSTER_COLOR_MAP)
+        plt.rcParams.update({
+            "figure.facecolor": color("bg"),
+            "axes.facecolor": color("card"),
+            "axes.edgecolor": color("border"),
+            "axes.labelcolor": color("muted"),
+            "axes.prop_cycle": cycler(color=chart_palette),
+            "text.color": color("text"),
+            "xtick.color": color("muted"),
+            "ytick.color": color("muted"),
+            "grid.color": color("border"),
+            "image.cmap": "stocksmart_groups",
+        })
+        st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
 
 
 apply_visual_styles()
+
+
+def render_model_summary_cards(metrics: pd.DataFrame, selected_model: str) -> None:
+    """Muestra los mismos indicadores de la tabla en tarjetas comparables."""
+    cards = st.columns(len(metrics))
+    for column, row in zip(cards, metrics.to_dict("records")):
+        with column:
+            with st.container(border=True):
+                st.markdown(f"#### {row['Modelo']}")
+                if row["Modelo"] == selected_model:
+                    st.caption("Mejor F1 macro de esta partición")
+                for label, key in (
+                    ("Accuracy", "Accuracy"),
+                    ("Precision macro", "Precision macro"),
+                    ("Recall macro", "Recall macro"),
+                    ("F1 macro", "F1 macro"),
+                ):
+                    st.markdown(
+                        f'<div class="model-metric-row"><span class="model-metric-label">{html.escape(label)}</span>'
+                        f'<strong class="model-metric-value">{row[key]:.3f}</strong></div>',
+                        unsafe_allow_html=True,
+                    )
 
 
 @st.cache_data(show_spinner=False)
@@ -112,17 +177,20 @@ def cached_mendeley_upload(sales_name: str, sales_bytes: bytes,
 
 def show_panel(clean: pd.DataFrame, report, origin_label: str, dataset: MendeleyDataset | None = None) -> None:
     render_section_intro("Resumen de ventas", "Indicadores y evolución de las ventas del origen seleccionado.")
-    st.caption(f"Origen de datos: {origin_label}")
+    st.caption(f"Fuente activa · {origin_label}")
     if dataset:
         sale_quality = dataset.quality["sales"]
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Ventas brutas*", f"{sale_quality['gross_sales_amount']:,.2f}")
-        col2.metric("Cantidad vendida*", f"{sale_quality['gross_units_positive_sales']:,.0f}")
-        col3.metric("Productos", f"{sale_quality['products']:,}")
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Tiendas", f"{sale_quality['stores']:,}")
-        col2.metric("Transacciones reportadas", f"{int(clean.TransactionCount.sum()):,}")
-        col3.metric("Filas marcadas devolución", f"{sale_quality['return_rows_excluded_from_demand']:,}")
+        with st.container(border=True):
+            st.markdown("#### Indicadores del conjunto")
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Ventas brutas*", f"{sale_quality['gross_sales_amount']:,.2f}")
+            col2.metric("Cantidad vendida*", f"{sale_quality['gross_units_positive_sales']:,.0f}")
+            col3.metric("Productos", f"{sale_quality['products']:,}")
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Tiendas", f"{sale_quality['stores']:,}")
+            col2.metric("Transacciones reportadas", f"{int(clean.TransactionCount.sum()):,}")
+            col3.metric("Filas marcadas devolución", f"{sale_quality['return_rows_excluded_from_demand']:,}")
+            st.caption(f"Ventas cubiertas: {sale_quality['date_min']} – {sale_quality['date_max']}.")
         st.caption(
             f"*Campos monetarios y cantidades tal como aparecen en el dataset; no se especifican moneda ni unidad física. "
             f"Devoluciones: {sale_quality['return_units_abs']:,.0f} cantidades y "
@@ -130,15 +198,19 @@ def show_panel(clean: pd.DataFrame, report, origin_label: str, dataset: Mendeley
             f"Monto neto reportado por el archivo: {sale_quality['net_sales_amount_reported']:,.2f}."
         )
     else:
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Ingresos", f"{clean.Revenue.sum():,.2f}")
-        col2.metric("Unidades vendidas", f"{clean.Quantity.sum():,.0f}")
-        col3.metric("Productos", f"{clean.StockCode.nunique():,}")
-        col4.metric("Registros válidos", f"{len(clean):,}")
+        with st.container(border=True):
+            st.markdown("#### Indicadores del conjunto")
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Ingresos", f"{clean.Revenue.sum():,.2f}")
+            col2.metric("Unidades vendidas", f"{clean.Quantity.sum():,.0f}")
+            col3.metric("Productos", f"{clean.StockCode.nunique():,}")
+            col4.metric("Registros válidos", f"{len(clean):,}")
     weekly = (clean.assign(Semana=clean.InvoiceDate.dt.to_period("W-SUN").dt.start_time)
               .groupby("Semana").Revenue.sum())
-    st.subheader("Ingresos por semana")
-    st.line_chart(weekly.rename("Ingresos"), y_label=("Monto reportado (moneda no indicada)" if dataset else "Ingresos"), width="stretch")
+    with st.container(border=True):
+        st.subheader("Ingresos por semana")
+        st.caption("Evolución agregada a partir de las ventas procesadas.")
+        st.line_chart(weekly.rename("Ingresos"), y_label=("Monto reportado (moneda no indicada)" if dataset else "Ingresos"), width="stretch")
     if dataset:
         sale_quality = dataset.quality["sales"]
         st.write(
@@ -151,10 +223,14 @@ def show_panel(clean: pd.DataFrame, report, origin_label: str, dataset: Mendeley
         products = clean.groupby("StockCode", as_index=False).agg(Quantity=("Quantity", "sum"), Revenue=("Revenue", "sum"))
         stores = clean.groupby("Store", as_index=False).agg(Quantity=("Quantity", "sum"), Revenue=("Revenue", "sum"))
         left, right = st.columns(2)
-        left.subheader("10 productos con más cantidad registrada")
-        left.bar_chart(products.nlargest(10, "Quantity").set_index("StockCode")["Quantity"])
-        right.subheader("Ventas por tienda")
-        right.bar_chart(stores.set_index("Store")["Revenue"])
+        with left:
+            with st.container(border=True):
+                st.subheader("10 productos con más cantidad registrada")
+                st.bar_chart(products.nlargest(10, "Quantity").set_index("StockCode")["Quantity"])
+        with right:
+            with st.container(border=True):
+                st.subheader("Ventas por tienda")
+                st.bar_chart(stores.set_index("Store")["Revenue"])
     else:
         st.write(f"Preprocesamiento: {report.rows_input:,} filas de entrada, {report.rows_output:,} filas válidas, "
                  f"{report.duplicate_rows:,} duplicados detectados, {report.cancellation_rows:,} cancelaciones y "
@@ -170,20 +246,26 @@ def show_data_page(raw: pd.DataFrame, clean: pd.DataFrame, report, dataset: Mend
             "Dataset Mendeley: calidad, transformaciones y relación de tablas",
             "Revisa el periodo, las exclusiones y la compatibilidad temporal entre ventas e inventario.",
         )
+        render_data_workflow(3)
         st.caption("Los CSV originales se leen por bloques y permanecen sin modificaciones; las tablas siguientes son el resultado normalizado en memoria.")
-        col1, col2, col3, col4, col5 = st.columns(5)
-        col1.metric("Filas de ventas fuente", f"{sales_quality['rows']:,}")
-        col2.metric("Ventas positivas usadas", f"{sales_quality['positive_sales_rows_retained']:,}")
-        col3.metric("Filas de inventario", f"{inventory_quality['rows']:,}")
-        col4.metric("Productos", f"{sales_quality['products']:,}")
-        col5.metric("Tiendas", f"{sales_quality['stores']:,}")
+        with st.container(border=True):
+            st.markdown("#### Resumen de los archivos")
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Filas de ventas fuente", f"{sales_quality['rows']:,}")
+            col2.metric("Ventas positivas usadas", f"{sales_quality['positive_sales_rows_retained']:,}")
+            col3.metric("Filas de inventario", f"{inventory_quality['rows']:,}")
+            col1, col2 = st.columns(2)
+            col1.metric("Productos", f"{sales_quality['products']:,}")
+            col2.metric("Tiendas", f"{sales_quality['stores']:,}")
         st.write(f"Periodo de ventas: **{sales_quality['date_min']} – {sales_quality['date_max']}**. "
                  f"Inicio de intervalos de inventario: **{inventory_quality['date_min']} – {inventory_quality['date_max']}**; "
                  f"{inventory_quality['open_ended_intervals']:,} intervalos terminan con el centinela 9999-12-31 (tratado como abierto).")
 
-        st.markdown("**Tratamiento de ventas:** se conservan para la demanda las filas `Is Return = 0` con `Qty Sold > 0`; "
-                    "las devoluciones se informan por separado y no se convierten en demanda positiva. "
-                    "`Revenue` conserva `Sales Amount`; `UnitPrice` es una variable derivada `Sales Amount / Qty Sold` para compatibilidad con el pipeline existente.")
+        with st.container(border=True):
+            st.markdown("#### Transformación aplicada")
+            st.markdown("Se conservan para la demanda las filas `Is Return = 0` con `Qty Sold > 0`; "
+                        "las devoluciones se informan por separado y no se convierten en demanda positiva. "
+                        "`Revenue` conserva `Sales Amount`; `UnitPrice` es una variable derivada `Sales Amount / Qty Sold` para compatibilidad con el pipeline existente.")
         missing_rows = []
         for section, details in [("Ventas", sales_quality), ("Inventario", inventory_quality)]:
             for column, count in details["missing_by_column"].items():
@@ -234,20 +316,25 @@ def show_data_page(raw: pd.DataFrame, clean: pd.DataFrame, report, dataset: Mend
         return
 
     render_section_intro("Carga y preprocesamiento", "Consulta el archivo recibido, las filas procesadas y los controles de calidad aplicados.")
-    st.markdown("Columnas requeridas: `InvoiceDate`, `StockCode`, `Quantity` y `UnitPrice`. "
-                "`InvoiceNo` permite reconocer facturas canceladas que empiezan por C.")
-    st.subheader("Vista previa del archivo de origen")
-    st.dataframe(raw.head(30), width="stretch")
-    st.subheader("Informe de calidad")
-    col1, col2 = st.columns(2)
-    col1.dataframe(pd.DataFrame({"Control": ["Filas de entrada", "Filas válidas", "Duplicados", "Cancelaciones",
-                                                    "Cantidades negativas", "Filas inválidas"],
-                                 "Cantidad": [report.rows_input, report.rows_output, report.duplicate_rows,
-                                              report.cancellation_rows, report.negative_quantity_rows,
-                                              report.invalid_rows_removed]}), hide_index=True, width="stretch")
-    col2.dataframe(pd.DataFrame({"Columna": list(report.missing_by_column),
-                                 "Valores faltantes": list(report.missing_by_column.values())}),
-                   hide_index=True, width="stretch")
+    render_data_workflow(3)
+    with st.container(border=True):
+        st.markdown("#### Esquema esperado")
+        st.markdown("Columnas requeridas: `InvoiceDate`, `StockCode`, `Quantity` y `UnitPrice`. "
+                    "`InvoiceNo` permite reconocer facturas canceladas que empiezan por C.")
+    with st.container(border=True):
+        st.subheader("Vista previa del archivo de origen")
+        st.dataframe(raw.head(30), width="stretch")
+    with st.container(border=True):
+        st.subheader("Informe de calidad")
+        col1, col2 = st.columns(2)
+        col1.dataframe(pd.DataFrame({"Control": ["Filas de entrada", "Filas válidas", "Duplicados", "Cancelaciones",
+                                                        "Cantidades negativas", "Filas inválidas"],
+                                     "Cantidad": [report.rows_input, report.rows_output, report.duplicate_rows,
+                                                  report.cancellation_rows, report.negative_quantity_rows,
+                                                  report.invalid_rows_removed]}), hide_index=True, width="stretch")
+        col2.dataframe(pd.DataFrame({"Columna": list(report.missing_by_column),
+                                     "Valores faltantes": list(report.missing_by_column.values())}),
+                       hide_index=True, width="stretch")
     st.caption("Se eliminan filas con campos requeridos inválidos, cancelaciones (si se dispone de InvoiceNo), "
                "cantidades no positivas y duplicados exactos. Los datos procesados se descargan, no se guardan en el repositorio.")
     st.download_button("Descargar ventas procesadas", clean.to_csv(index=False).encode("utf-8-sig"),
@@ -256,11 +343,18 @@ def show_data_page(raw: pd.DataFrame, clean: pd.DataFrame, report, dataset: Mend
 
 def show_models_page(clean: pd.DataFrame, dataset_key: str) -> None:
     render_section_intro(
-        "Clasificación de demanda semanal",
-        "KNN, Árbol de Decisión y MLP clasifican la demanda de la semana siguiente como Baja, Media o Alta; no calculan unidades exactas para comprar.",
+        "Modelos de demanda",
+        "Compara tres algoritmos que clasifican la demanda semanal en Baja, Media y Alta.",
     )
-    st.markdown("Los rezagos, el promedio, la variabilidad y la tendencia se calculan con semanas observadas antes de la semana objetivo.")
-    low_pct, high_pct = st.slider("Percentiles para separar clases baja, media y alta", 0, 100, (33, 67), key="demand_thresholds")
+    st.caption("Los modelos estiman una categoría para la semana siguiente; no calculan directamente cuántas unidades comprar.")
+    with st.container(border=True):
+        st.markdown("#### Parámetros de clasificación")
+        low_pct, high_pct = st.slider(
+            "Percentiles que delimitan las clases de demanda (%)",
+            0, 100, (33, 67), key="demand_thresholds",
+            help="Los percentiles separan las etiquetas Baja, Media y Alta. En la evaluación, los límites se ajustan solo con el conjunto de entrenamiento.",
+        )
+        st.caption(f"Percentiles seleccionados: {low_pct} y {high_pct}. Los valores se mantienen iguales para todos los modelos.")
     stage = "weekly_feature_generation"
     try:
         logger.info("Demand page stage started: stage=%s input_rows=%d input_columns=%d",
@@ -290,29 +384,55 @@ def show_models_page(clean: pd.DataFrame, dataset_key: str) -> None:
             st.warning(result["warning"])
             return
         st.session_state["model_report"] = {"dataset_key": dataset_key, "result": result}
-        stage = "metrics_table_render"
-        logger.info("Demand page stage started: stage=%s metric_rows=%d metric_columns=%d",
-                    stage, len(result["metrics"]), len(result["metrics"].columns))
-        st.dataframe(result["metrics"].style.format({c: "{:.3f}" for c in result["metrics"].columns if c != "Modelo"}),
-                     hide_index=True, width="stretch")
-        logger.info("Demand page stage completed: stage=%s", stage)
         if result["warning"]:
             stage = "evaluation_warning_render"
             st.warning(result["warning"])
+
+        metrics = result["metrics"]
+        winner = metrics.loc[metrics["Modelo"].eq(result["selected"])].iloc[0]
+        st.markdown("### Mejor resultado")
+        with st.container(border=True):
+            winner_name, winner_score = st.columns([2, 1])
+            winner_name.markdown(f"#### {result['selected']}")
+            winner_name.caption("Mayor F1 macro en la partición cronológica evaluada.")
+            winner_score.metric("F1 macro", f"{winner['F1 macro']:.3f}")
+            st.success(f"Mayor F1 macro en esta partición: {result['selected']}")
+            st.caption("Este resultado resume una sola ventana temporal y no garantiza que el modelo sea el mejor en otros periodos.")
+
+        st.markdown("### Comparación rápida")
+        st.caption("Indicadores macro y accuracy de la misma evaluación; las cifras se muestran en escala de 0 a 1.")
+        render_model_summary_cards(metrics, result["selected"])
+
+        stage = "metrics_table_render"
+        logger.info("Demand page stage started: stage=%s metric_rows=%d metric_columns=%d",
+                    stage, len(metrics), len(metrics.columns))
+        st.markdown("### Comparación detallada")
+        st.caption("Incluye todas las métricas macro y las métricas de cada clase. Desplázate horizontalmente para consultar las columnas completas.")
+        st.dataframe(metrics.style.format({c: "{:.3f}" for c in metrics.columns if c != "Modelo"}),
+                     hide_index=True, width="stretch")
+        logger.info("Demand page stage completed: stage=%s", stage)
+
         stage = "selected_model_render"
-        st.success(f"Mayor F1 macro en esta partición: {result['selected']}")
+        st.markdown("### Matriz de confusión")
+        st.caption("Las filas representan la clase real y las columnas la clase predicha. La diagonal contiene los aciertos; el resto muestra las confusiones.")
         stage = "confusion_matrix_selector"
         logger.info("Demand page stage started: stage=%s available_matrices=%d",
                     stage, len(result["confusion"]))
-        selected = st.selectbox("Matriz de confusión", list(result["confusion"]), key="confusion_model")
+        with st.container(border=True):
+            selected = st.selectbox(
+                "Modelo para la matriz",
+                list(result["confusion"]),
+                key="confusion_model",
+                help="Cambia el modelo para consultar su matriz de confusión del mismo conjunto de prueba.",
+            )
+            st.dataframe(result["confusion"][selected], width="stretch")
         logger.info("Demand page stage completed: stage=%s selected=%s", stage, selected)
-        stage = "confusion_matrix_render"
-        st.dataframe(result["confusion"][selected], width="stretch")
-        logger.info("Demand page stage completed: stage=%s", stage)
+
+        st.caption("Accuracy: proporción de aciertos. Precision: acierto entre predicciones de una clase. Recall: proporción de esa clase identificada. F1: balance entre precision y recall.")
         stage = "metrics_csv_export"
         logger.info("Demand page stage started: stage=%s", stage)
-        st.download_button("Descargar métricas CSV", result["metrics"].to_csv(index=False).encode("utf-8-sig"),
-                           "metricas_modelos.csv", "text/csv")
+        st.download_button("Descargar métricas CSV", metrics.to_csv(index=False).encode("utf-8-sig"),
+                           "metricas_modelos.csv", "text/csv", use_container_width=True)
         logger.info("Demand page stage completed: stage=%s", stage)
         stage = "temporal_summary_render"
         st.caption(f"Corte cronológico por semana: entrenamiento hasta {result['train_last_week'].date()}, "
@@ -338,7 +458,10 @@ def show_clustering_page(clean: pd.DataFrame) -> None:
     if product_count < 3:
         st.warning("Se requieren al menos tres productos para segmentar.")
         return
-    k = st.slider("Número de grupos", 2, min(8, product_count - 1), min(3, product_count - 1), key="cluster_count")
+    with st.container(border=True):
+        st.markdown("#### Configuración de segmentos")
+        k = st.slider("Número de grupos", 2, min(8, product_count - 1), min(3, product_count - 1), key="cluster_count")
+        st.caption("Los dos métodos reutilizan este número de grupos y las mismas variables escaladas.")
     try:
         with st.spinner("Agrupando productos con variables estandarizadas…"):
             result = cached_segmentation(clean, k)
@@ -351,33 +474,42 @@ def show_clustering_page(clean: pd.DataFrame) -> None:
         kmeans_tab, hierarchical_tab = st.tabs(["K-Means", "Clustering jerárquico"])
         with kmeans_tab:
             st.subheader("K-Means")
-            fig, ax = plt.subplots()
-            points = ax.scatter(result["products"].units, result["products"].revenue,
-                                c=result["products"]["K-Means"], cmap="viridis")
-            ax.set(xlabel="Unidades vendidas", ylabel="Ingresos", title="Segmentación K-Means")
-            fig.colorbar(points, ax=ax, label="Grupo")
-            st.pyplot(fig); plt.close(fig)
-            st.write("Perfil medio de los grupos (unidades originales)")
-            st.dataframe(result["profile_kmeans"], width="stretch")
-            score = result["silhouette_kmeans"]
-            st.metric("Silhouette", f"{score:.3f}" if score is not None else "No aplicable")
+            with st.container(border=True):
+                fig, ax = plt.subplots()
+                points = ax.scatter(result["products"].units, result["products"].revenue,
+                                    c=result["products"]["K-Means"], cmap=CLUSTER_COLOR_MAP)
+                ax.set(xlabel="Unidades vendidas", ylabel="Ingresos", title="Segmentación K-Means")
+                fig.colorbar(points, ax=ax, label="Grupo")
+                st.pyplot(fig); plt.close(fig)
+            with st.container(border=True):
+                score = result["silhouette_kmeans"]
+                st.metric("Silhouette", f"{score:.3f}" if score is not None else "No aplicable")
+                st.caption("Resume la separación geométrica de los grupos; no representa valor comercial.")
+            with st.container(border=True):
+                st.write("Perfil medio de los grupos (unidades originales)")
+                st.dataframe(result["profile_kmeans"], width="stretch")
         with hierarchical_tab:
             st.subheader("Clustering jerárquico Ward")
-            fig, ax = plt.subplots()
-            points = ax.scatter(result["products"].units, result["products"].revenue,
-                                c=result["products"]["Jerárquico"], cmap="plasma")
-            ax.set(xlabel="Unidades vendidas", ylabel="Ingresos", title="Segmentación jerárquica")
-            fig.colorbar(points, ax=ax, label="Grupo")
-            st.pyplot(fig); plt.close(fig)
-            st.write("Perfil medio de los grupos (unidades originales)")
-            st.dataframe(result["profile_hierarchical"], width="stretch")
-            score = result["silhouette_hierarchical"]
-            st.metric("Silhouette", f"{score:.3f}" if score is not None else "No aplicable")
-            st.subheader("Dendrograma Ward")
-            fig, ax = plt.subplots(figsize=(10, 4))
-            draw_dendrogram(result, max_leaves=30, ax=ax)
-            ax.set_ylabel("Distancia")
-            st.pyplot(fig); plt.close(fig)
+            with st.container(border=True):
+                fig, ax = plt.subplots()
+                points = ax.scatter(result["products"].units, result["products"].revenue,
+                                    c=result["products"]["Jerárquico"], cmap=CLUSTER_COLOR_MAP)
+                ax.set(xlabel="Unidades vendidas", ylabel="Ingresos", title="Segmentación jerárquica")
+                fig.colorbar(points, ax=ax, label="Grupo")
+                st.pyplot(fig); plt.close(fig)
+            with st.container(border=True):
+                score = result["silhouette_hierarchical"]
+                st.metric("Silhouette", f"{score:.3f}" if score is not None else "No aplicable")
+                st.caption("Resume la separación geométrica de los grupos; no representa valor comercial.")
+            with st.container(border=True):
+                st.write("Perfil medio de los grupos (unidades originales)")
+                st.dataframe(result["profile_hierarchical"], width="stretch")
+            with st.container(border=True):
+                st.subheader("Dendrograma Ward")
+                fig, ax = plt.subplots(figsize=(10, 4))
+                draw_dendrogram(result, max_leaves=30, ax=ax)
+                ax.set_ylabel("Distancia")
+                st.pyplot(fig); plt.close(fig)
             if product_count > 30:
                 st.caption("Dendrograma resumido a 30 ramas para facilitar su lectura; la asignación usa todos los productos.")
         st.subheader("Asignación por producto")
@@ -409,13 +541,17 @@ def show_inventory_page(clean: pd.DataFrame, dataset: MendeleyDataset | None = N
                 as_of = alerts["Fecha de consulta"].iloc[0]
                 st.caption(f"Fecha de consulta: {as_of.date()}. La demanda es la media de las cuatro semanas calendario completas anteriores; filas sin venta en la ventana no se convierten en demanda cero.")
                 counts = alerts["Alerta"].value_counts()
-                col1, col2, col3 = st.columns(3)
-                col1.metric("Claves evaluadas", f"{len(alerts):,}")
-                col2.metric("Riesgo orientativo", f"{int(counts.get('Riesgo orientativo: demanda media supera existencia observada', 0)):,}")
-                col3.metric("Sin intervalo compatible", f"{int(counts.get('Sin intervalo de inventario compatible', 0)):,}")
-                st.dataframe(alerts, hide_index=True, width="stretch")
-                st.download_button("Descargar alertas observadas CSV", alerts_to_csv(alerts),
-                                   "alertas_inventario_observado.csv", "text/csv")
+                with st.container(border=True):
+                    st.markdown("#### Resumen de existencias observadas")
+                    col1, col2, col3 = st.columns(3)
+                    col1.metric("Claves evaluadas", f"{len(alerts):,}")
+                    col2.metric("Riesgo orientativo", f"{int(counts.get('Riesgo orientativo: demanda media supera existencia observada', 0)):,}")
+                    col3.metric("Sin intervalo compatible", f"{int(counts.get('Sin intervalo de inventario compatible', 0)):,}")
+                with st.container(border=True):
+                    st.markdown("#### Detalle por producto, tienda y canal")
+                    st.dataframe(alerts, hide_index=True, width="stretch")
+                    st.download_button("Descargar alertas observadas CSV", alerts_to_csv(alerts),
+                                       "alertas_inventario_observado.csv", "text/csv")
         except ValueError as exc:
             st.error(f"No se pudieron calcular alertas con inventario observado: {exc}")
         st.caption("Una existencia negativa o igual a cero se marca para revisión. La comparación con una media de ventas solo indica riesgo orientativo; no confirma una rotura de stock, no modela plazos y la ficha describe una muestra estratificada.")
@@ -443,9 +579,12 @@ def show_manual_inventory_page(clean: pd.DataFrame) -> None:
         st.caption("Si las ventas están agregadas entre varias tiendas, ingresa el stock total que corresponda a esa misma cobertura.")
     products = sorted(clean.StockCode.unique())
     template = pd.DataFrame({"StockCode": products, "Stock": [pd.NA] * len(products)})
-    st.download_button("Descargar plantilla de stock", template.to_csv(index=False).encode("utf-8-sig"),
-                       "plantilla_stock_actual.csv", "text/csv")
-    stock_upload = st.file_uploader("Importar stock CSV (StockCode, Stock)", type=["csv"], key="inventory_upload")
+    with st.container(border=True):
+        st.markdown("#### 1 · Cargar o preparar existencias")
+        template_col, upload_col = st.columns(2)
+        template_col.download_button("Descargar plantilla de stock", template.to_csv(index=False).encode("utf-8-sig"),
+                                     "plantilla_stock_actual.csv", "text/csv", use_container_width=True)
+        stock_upload = upload_col.file_uploader("Importar stock CSV (StockCode, Stock)", type=["csv"], key="inventory_upload")
     try:
         if stock_upload:
             stock = pd.read_csv(stock_upload, dtype={"StockCode": "string"})
@@ -454,23 +593,25 @@ def show_manual_inventory_page(clean: pd.DataFrame) -> None:
         if not {"StockCode", "Stock"}.issubset(stock.columns):
             st.error("El archivo debe contener las columnas StockCode y Stock.")
             return
-        edited = st.data_editor(
-            stock[["StockCode", "Stock"]], num_rows="dynamic", width="stretch",
-            column_config={"Stock": st.column_config.NumberColumn("Stock actual (unidades)", min_value=0, step=1)},
-            key="inventory_editor",
-        )
-        codes = edited.StockCode.astype("string").str.strip()
-        quantities = pd.to_numeric(edited.Stock, errors="coerce")
-        if codes.isna().any() or codes.eq("").any() or quantities.isna().any():
-            st.warning("Completa el código y el stock actual de cada fila antes de calcular. Los campos vacíos no se asumen como cero.")
-        elif (quantities < 0).any():
-            st.error("El stock actual no puede ser negativo.")
-        else:
-            validated = edited.copy()
-            validated["StockCode"], validated["Stock"] = codes, quantities
-            alerts = create_inventory_alerts(clean, validated)
-            st.dataframe(alerts, hide_index=True, width="stretch")
-            st.download_button("Descargar alertas CSV", alerts_to_csv(alerts), "alertas_inventario.csv", "text/csv")
+        with st.container(border=True):
+            st.markdown("#### 2 · Revisar y calcular")
+            edited = st.data_editor(
+                stock[["StockCode", "Stock"]], num_rows="dynamic", width="stretch",
+                column_config={"Stock": st.column_config.NumberColumn("Stock actual (unidades)", min_value=0, step=1)},
+                key="inventory_editor",
+            )
+            codes = edited.StockCode.astype("string").str.strip()
+            quantities = pd.to_numeric(edited.Stock, errors="coerce")
+            if codes.isna().any() or codes.eq("").any() or quantities.isna().any():
+                st.warning("Completa el código y el stock actual de cada fila antes de calcular. Los campos vacíos no se asumen como cero.")
+            elif (quantities < 0).any():
+                st.error("El stock actual no puede ser negativo.")
+            else:
+                validated = edited.copy()
+                validated["StockCode"], validated["Stock"] = codes, quantities
+                alerts = create_inventory_alerts(clean, validated)
+                st.dataframe(alerts, hide_index=True, width="stretch")
+                st.download_button("Descargar alertas CSV", alerts_to_csv(alerts), "alertas_inventario.csv", "text/csv")
     except (ValueError, pd.errors.ParserError, pd.errors.EmptyDataError, UnicodeDecodeError) as exc:
         st.error(f"No se pudieron calcular las alertas: {exc}")
     st.caption("Límites: las ventas observadas pueden subestimar demanda si hubo quiebres de stock. La estimación no incluye estacionalidad, plazos de entrega, compras en tránsito ni inventario reservado; es una guía, no una orden automática de compra.")
@@ -479,12 +620,19 @@ def show_manual_inventory_page(clean: pd.DataFrame) -> None:
 def show_report_page(clean: pd.DataFrame, origin_label: str, dataset_key: str,
                      dataset: MendeleyDataset | None = None) -> None:
     render_section_intro("Informe de resultados", "Resumen del origen, resultados disponibles en esta sesión y límites de interpretación.")
-    st.write(f"Origen: **{origin_label}**. Filas procesadas: {len(clean):,}. Productos: {clean.StockCode.nunique():,}.")
+    with st.container(border=True):
+        st.markdown("#### Resumen del análisis")
+        st.caption(f"Fuente de datos · {origin_label}")
+        summary_left, summary_right = st.columns(2)
+        summary_left.metric("Filas procesadas", f"{len(clean):,}")
+        summary_right.metric("Productos", f"{clean.StockCode.nunique():,}")
     if dataset:
         sales_quality, inventory_quality = dataset.quality["sales"], dataset.quality["inventory"]
-        st.write(f"Periodo de ventas real: {sales_quality['date_min']} a {sales_quality['date_max']}. "
-                 f"Periodo de inicio de intervalos de inventario: {inventory_quality['date_min']} a {inventory_quality['date_max']}. "
-                 "La moneda y las unidades físicas no están especificadas en los archivos.")
+        with st.container(border=True):
+            st.markdown("#### Cobertura y unidades")
+            st.write(f"Periodo de ventas real: **{sales_quality['date_min']} a {sales_quality['date_max']}**. "
+                     f"Periodo de inicio de intervalos de inventario: **{inventory_quality['date_min']} a {inventory_quality['date_max']}**.")
+            st.caption("La moneda y las unidades físicas no están especificadas en los archivos.")
         quality_rows = []
         for section, details in [("Ventas", sales_quality), ("Inventario", inventory_quality)]:
             quality_rows.extend({"Tabla": section, "Columna": column, "Valores faltantes": count}
@@ -492,38 +640,60 @@ def show_report_page(clean: pd.DataFrame, origin_label: str, dataset_key: str,
         quality_table = pd.DataFrame(quality_rows, columns=["Tabla", "Columna", "Valores faltantes"])
         if quality_table.empty:
             quality_table = pd.DataFrame([{"Tabla": "Ambas", "Columna": "Sin faltantes detectados", "Valores faltantes": 0}])
-        st.download_button("Descargar resumen de calidad CSV", quality_table.to_csv(index=False).encode("utf-8-sig"),
-                           "calidad_dataset_mendeley.csv", "text/csv")
-    st.write("Modelos de demanda: KNN, Árbol de Decisión y MLP de scikit-learn. "
-             "Segmentación: K-Means y clustering jerárquico Ward.")
+        with st.container(border=True):
+            st.markdown("#### Calidad de los datos")
+            st.dataframe(quality_table, hide_index=True, width="stretch")
+            st.download_button("Descargar resumen de calidad CSV", quality_table.to_csv(index=False).encode("utf-8-sig"),
+                               "calidad_dataset_mendeley.csv", "text/csv")
+    with st.container(border=True):
+        st.markdown("#### Métodos incluidos")
+        methods_left, methods_right = st.columns(2)
+        methods_left.info("**Demanda**\n\nKNN · Árbol de Decisión · MLP")
+        methods_right.info("**Segmentación**\n\nK-Means · Ward")
     report = st.session_state.get("model_report")
     if report and report.get("dataset_key") == dataset_key and not report["result"]["metrics"].empty:
         result = report["result"]
-        st.success(f"Mejor F1 macro medido en la evaluación cronológica: {result['selected']}")
-        st.dataframe(result["metrics"], hide_index=True, width="stretch")
-        st.download_button("Descargar tabla de métricas CSV", result["metrics"].to_csv(index=False).encode("utf-8-sig"),
-                           "metricas_modelos.csv", "text/csv")
+        with st.container(border=True):
+            st.markdown("#### Resultados de modelos")
+            st.success(f"Mejor F1 macro medido en la evaluación cronológica: {result['selected']}")
+            st.dataframe(result["metrics"], hide_index=True, width="stretch")
+            st.download_button("Descargar tabla de métricas CSV", result["metrics"].to_csv(index=False).encode("utf-8-sig"),
+                               "metricas_modelos.csv", "text/csv")
     else:
-        st.info("Ve a Modelos de demanda para entrenar y evaluar los clasificadores; sus resultados aparecerán aquí.")
+        with st.container(border=True):
+            st.info("Ve a Modelos de demanda para entrenar y evaluar los clasificadores; sus resultados aparecerán aquí.")
     if dataset:
-        st.markdown("**Limitaciones:** el dataset se describe como muestra estratificada; no especifica moneda ni unidad física. Las fechas Start/End determinan compatibilidad por intervalo, pero no documentan el instante de medición de Qty on hand. Hay ventas sin intervalo compatible y diferencias entre Sales Type y Stock Status. La alerta no confirma rotura de stock ni incorpora plazos o compras en tránsito. La clasificación agrega por producto entre tiendas y usa una sola división cronológica.")
+        limitations = "**Limitaciones:** el dataset se describe como muestra estratificada; no especifica moneda ni unidad física. Las fechas Start/End determinan compatibilidad por intervalo, pero no documentan el instante de medición de Qty on hand. Hay ventas sin intervalo compatible y diferencias entre Sales Type y Stock Status. La alerta no confirma rotura de stock ni incorpora plazos o compras en tránsito. La clasificación agrega por producto entre tiendas y usa una sola división cronológica."
     else:
-        st.markdown("**Limitaciones:** ventas observadas no equivalen a demanda completa si hubo falta de stock; no hay inventario histórico; la alerta usa una media de cuatro semanas y no modela plazos, estacionalidad ni compras en tránsito; la evaluación de clasificación usa una sola división cronológica.")
+        limitations = "**Limitaciones:** ventas observadas no equivalen a demanda completa si hubo falta de stock; no hay inventario histórico; la alerta usa una media de cuatro semanas y no modela plazos, estacionalidad ni compras en tránsito; la evaluación de clasificación usa una sola división cronológica."
+    with st.container(border=True):
+        st.markdown("#### Límites de interpretación")
+        st.markdown(limitations)
 
 
 st.markdown(
-    '<div class="app-brand"><div class="app-brand-mark" aria-hidden="true">S</div>'
+    '<div class="app-brand"><div class="app-brand-mark" aria-hidden="true">📦</div>'
     '<div><h1 class="app-brand-title">StockSmart ML</h1>'
-    '<div class="app-brand-subtitle">Ventas, demanda e inventario en una sola vista</div></div></div>',
+    '<div class="app-brand-subtitle">Análisis inteligente de ventas, demanda e inventario</div></div></div>',
     unsafe_allow_html=True,
 )
 st.markdown("<div class='app-top-rule'></div>", unsafe_allow_html=True)
 
 with st.sidebar:
     st.markdown("<div class='sidebar-brand'>STOCKSMART <span>ML</span></div>", unsafe_allow_html=True)
-    st.header("Datos de entrada")
-    st.caption("Selecciona cómo quieres iniciar el análisis.")
-    source = st.radio("Origen", ["Demostración", "Dataset Mendeley", "Archivo propio"], key="data_source")
+    st.caption("FUENTE DE DATOS")
+    st.caption("Elige los datos que alimentan este análisis.")
+    source_labels = {
+        "Demostración": "🧪  Demostración",
+        "Dataset Mendeley": "📊  Dataset Mendeley",
+        "Archivo propio": "📄  Archivo propio",
+    }
+    source = st.radio(
+        "Origen",
+        ["Demostración", "Dataset Mendeley", "Archivo propio"],
+        key="data_source",
+        format_func=lambda value: source_labels[value],
+    )
     uploaded = st.file_uploader("Subir CSV o Excel", type=["csv", "xlsx", "xlsm", "xls"], key="sales_upload") if source == "Archivo propio" else None
     mendeley_sales_upload = None
     mendeley_inventory_upload = None
@@ -542,9 +712,21 @@ with st.sidebar:
     else:
         st.caption("La demo usa datos sintéticos reproducibles.")
     st.divider()
-    st.caption("SECCIONES")
-    section = st.radio("Navegación", ["Panel principal", "Carga de datos", "Modelos de demanda",
-                                       "Clustering", "Alertas de inventario", "Informe"], key="main_navigation")
+    st.caption("ANÁLISIS")
+    section_labels = {
+        "Panel principal": "📊  Panel principal",
+        "Carga de datos": "🗂️  Carga de datos",
+        "Modelos de demanda": "📈  Modelos de demanda",
+        "Clustering": "🧩  Clustering",
+        "Alertas de inventario": "📦  Alertas de inventario",
+        "Informe": "📋  Informe",
+    }
+    section = st.radio(
+        "Navegación",
+        ["Panel principal", "Carga de datos", "Modelos de demanda", "Clustering", "Alertas de inventario", "Informe"],
+        key="main_navigation",
+        format_func=lambda value: section_labels[value],
+    )
     section_descriptions = {
         "Panel principal": "Indicadores y tendencia de ventas.",
         "Carga de datos": "Archivo procesado y calidad de los datos.",
@@ -614,6 +796,12 @@ elif dataset:
     st.success("Dataset Mendeley real seleccionado. Ventas positivas, devoluciones e inventario se tratan por separado.")
 else:
     st.success("Datos cargados y procesados desde el archivo seleccionado.")
+
+st.markdown(
+    '<div class="data-source-pill"><span class="data-source-kicker">FUENTE ACTIVA</span>'
+    f'<span class="data-source-value">{html.escape(origin)}</span></div>',
+    unsafe_allow_html=True,
+)
 
 if section == "Panel principal":
     show_panel(clean, cleaning_report, origin, dataset)
