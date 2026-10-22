@@ -52,6 +52,18 @@ python -m pip check
 python -m streamlit run app.py
 ```
 
+## Despliegue en Streamlit Community Cloud
+
+El repositorio está preparado para Community Cloud: la aplicación de entrada es `app.py`, `requirements.txt` está en la raíz y la demostración se genera en memoria, por lo que no hace falta subir un dataset. Las versiones directas fijadas fueron comprobadas en Python 3.12.10 en Windows; no se ha ejecutado un build en Community Cloud ni se ha verificado el despliegue remoto.
+
+1. Inicia sesión en [Streamlit Community Cloud](https://share.streamlit.io/) con GitHub y autoriza el acceso al repositorio `BugMaster26/StockSmart-ML`.
+2. Elige **Create app** y selecciona ese repositorio, la rama `main` y el archivo principal `app.py`.
+3. En **Advanced settings**, selecciona Python **3.12** si la plataforma ofrece el selector de versión. No se añade `runtime.txt`: la selección se realiza en la configuración de la aplicación y se evita fijar un archivo de runtime antiguo.
+4. Pulsa **Deploy**. Espera a que termine la instalación de `requirements.txt` y el arranque. Si falla, abre **Manage app** y consulta los logs antes de cambiar dependencias.
+5. Abre la URL `.streamlit.app` que asigne la plataforma y comprueba el panel con **Demostración**. Para probar datos propios, cambia a **Cargar archivo**; el repositorio no trae datos reales.
+
+No se requieren secretos de Streamlit ni variables de entorno para el funcionamiento actual. La aplicación procesa archivos cargados en memoria y ofrece salidas descargables; evita cargar información personal o confidencial en una aplicación pública. El inicio local y las pruebas automatizadas no certifican disponibilidad, rendimiento o compatibilidad en producción; esas condiciones solo pueden confirmarse tras desplegar y probar la URL asignada.
+
 ## Dataset
 
 La fuente sugerida es [Online Retail de UCI](https://archive.ics.uci.edu/dataset/352/online+retail), pero el archivo no está incluido. Carga un CSV, XLSX, XLSM o XLS con estas columnas exactas: `InvoiceDate`, `StockCode`, `Quantity`, `UnitPrice`. `InvoiceNo` es opcional para reconocer cancelaciones. La demo es sintética y reproducible.
