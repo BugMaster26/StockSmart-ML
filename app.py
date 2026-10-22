@@ -24,6 +24,22 @@ st.set_page_config(page_title="StockSmart ML", page_icon="📦", layout="wide")
 logger = logging.getLogger(__name__)
 
 
+def render_section_intro(title: str, description: str) -> None:
+    """Presenta un título y una explicación breve sin alterar el flujo de datos."""
+    st.subheader(title)
+    st.caption(description)
+
+
+def apply_visual_styles() -> None:
+    """Carga estilos locales de presentación; no añade dependencias ni cambia controles."""
+    stylesheet = Path(__file__).resolve().parent / "assets" / "theme.css"
+    if stylesheet.is_file():
+        st.markdown(f"<style>{stylesheet.read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
+
+
+apply_visual_styles()
+
+
 @st.cache_data(show_spinner=False)
 def load_frame(file_bytes: bytes, filename: str) -> pd.DataFrame:
     """Carga CSV/Excel en memoria; no escribe los archivos subidos a disco."""
@@ -95,17 +111,18 @@ def cached_mendeley_upload(sales_name: str, sales_bytes: bytes,
 
 
 def show_panel(clean: pd.DataFrame, report, origin_label: str, dataset: MendeleyDataset | None = None) -> None:
-    st.subheader("Resumen de ventas")
+    render_section_intro("Resumen de ventas", "Indicadores y evolución de las ventas del origen seleccionado.")
     st.caption(f"Origen de datos: {origin_label}")
     if dataset:
         sale_quality = dataset.quality["sales"]
-        col1, col2, col3, col4, col5, col6 = st.columns(6)
-        col1.metric("Monto de ventas brutas*", f"{sale_quality['gross_sales_amount']:,.2f}")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Ventas brutas*", f"{sale_quality['gross_sales_amount']:,.2f}")
         col2.metric("Cantidad vendida*", f"{sale_quality['gross_units_positive_sales']:,.0f}")
         col3.metric("Productos", f"{sale_quality['products']:,}")
-        col4.metric("Tiendas", f"{sale_quality['stores']:,}")
-        col5.metric("Transacciones reportadas", f"{int(clean.TransactionCount.sum()):,}")
-        col6.metric("Filas marcadas devolución", f"{sale_quality['return_rows_excluded_from_demand']:,}")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Tiendas", f"{sale_quality['stores']:,}")
+        col2.metric("Transacciones reportadas", f"{int(clean.TransactionCount.sum()):,}")
+        col3.metric("Filas marcadas devolución", f"{sale_quality['return_rows_excluded_from_demand']:,}")
         st.caption(
             f"*Campos monetarios y cantidades tal como aparecen en el dataset; no se especifican moneda ni unidad física. "
             f"Devoluciones: {sale_quality['return_units_abs']:,.0f} cantidades y "
@@ -149,7 +166,10 @@ def show_data_page(raw: pd.DataFrame, clean: pd.DataFrame, report, dataset: Mend
         quality = dataset.quality
         sales_quality, inventory_quality = quality["sales"], quality["inventory"]
         relation = quality["relationship"]
-        st.subheader("Dataset Mendeley: calidad, transformaciones y relación de tablas")
+        render_section_intro(
+            "Dataset Mendeley: calidad, transformaciones y relación de tablas",
+            "Revisa el periodo, las exclusiones y la compatibilidad temporal entre ventas e inventario.",
+        )
         st.caption("Los CSV originales se leen por bloques y permanecen sin modificaciones; las tablas siguientes son el resultado normalizado en memoria.")
         col1, col2, col3, col4, col5 = st.columns(5)
         col1.metric("Filas de ventas fuente", f"{sales_quality['rows']:,}")
@@ -213,7 +233,7 @@ def show_data_page(raw: pd.DataFrame, clean: pd.DataFrame, report, dataset: Mend
         st.caption("Licencia declarada en la ficha de Mendeley: CC BY 4.0. Los resultados corresponden a una muestra estratificada y no prueban ventas ni disponibilidad completas del negocio.")
         return
 
-    st.subheader("Carga y preprocesamiento")
+    render_section_intro("Carga y preprocesamiento", "Consulta el archivo recibido, las filas procesadas y los controles de calidad aplicados.")
     st.markdown("Columnas requeridas: `InvoiceDate`, `StockCode`, `Quantity` y `UnitPrice`. "
                 "`InvoiceNo` permite reconocer facturas canceladas que empiezan por C.")
     st.subheader("Vista previa del archivo de origen")
@@ -235,9 +255,11 @@ def show_data_page(raw: pd.DataFrame, clean: pd.DataFrame, report, dataset: Mend
 
 
 def show_models_page(clean: pd.DataFrame, dataset_key: str) -> None:
-    st.subheader("Predicción de demanda semanal")
-    st.markdown("El objetivo es la demanda de la semana siguiente. Rezagos, promedio, variabilidad y tendencia "
-                "se calculan con semanas observadas antes del objetivo.")
+    render_section_intro(
+        "Clasificación de demanda semanal",
+        "KNN, Árbol de Decisión y MLP clasifican la demanda de la semana siguiente como Baja, Media o Alta; no calculan unidades exactas para comprar.",
+    )
+    st.markdown("Los rezagos, el promedio, la variabilidad y la tendencia se calculan con semanas observadas antes de la semana objetivo.")
     low_pct, high_pct = st.slider("Percentiles para separar clases baja, media y alta", 0, 100, (33, 67), key="demand_thresholds")
     stage = "weekly_feature_generation"
     try:
@@ -308,7 +330,10 @@ def show_models_page(clean: pd.DataFrame, dataset_key: str) -> None:
 
 
 def show_clustering_page(clean: pd.DataFrame) -> None:
-    st.subheader("Segmentación de productos")
+    render_section_intro(
+        "Segmentación de productos",
+        "Compara agrupaciones de productos construidas con variables de ventas estandarizadas. Los números de grupo son etiquetas, no categorías comerciales.",
+    )
     product_count = clean.StockCode.nunique()
     if product_count < 3:
         st.warning("Se requieren al menos tres productos para segmentar.")
@@ -317,8 +342,12 @@ def show_clustering_page(clean: pd.DataFrame) -> None:
     try:
         with st.spinner("Agrupando productos con variables estandarizadas…"):
             result = cached_segmentation(clean, k)
-        st.caption("Ambos métodos usan las mismas variables escaladas: " + ", ".join(result["feature_names"]) +
-                   ". Los gráficos muestran unidades e ingresos en sus unidades originales.")
+        st.caption(
+            f"Se están generando {k} grupos. Ambos métodos usan las mismas variables escaladas: "
+            + ", ".join(result["feature_names"])
+            + ". Los gráficos muestran unidades e ingresos en sus unidades originales. "
+            "Silhouette resume separación geométrica, no valor de negocio."
+        )
         kmeans_tab, hierarchical_tab = st.tabs(["K-Means", "Clustering jerárquico"])
         with kmeans_tab:
             st.subheader("K-Means")
@@ -361,10 +390,17 @@ def show_inventory_page(clean: pd.DataFrame, dataset: MendeleyDataset | None = N
     if dataset is None:
         show_manual_inventory_page(clean)
         return
-    st.subheader("Alertas de inventario")
-    st.markdown("Las alertas basadas en el CSV usan solo inventario temporalmente compatible por producto, tienda y canal. La vista manual sigue disponible como alternativa.")
+    render_section_intro(
+        "Alertas de inventario",
+        "Elige entre comparar una existencia observada compatible del dataset o ingresar existencias actuales manualmente.",
+    )
+    st.markdown("Las alertas son orientativas: una comparación de ventas con stock no confirma una rotura ni genera una orden de compra.")
     observed_tab, manual_tab = st.tabs(["Existencia observada en intervalo", "Stock manual"])
     with observed_tab:
+        st.caption(
+            "Usa las existencias del dataset Mendeley cuando producto, tienda, canal y fecha coinciden "
+            "con exactamente un intervalo. Sin ventas observadas en la ventana no se supone demanda cero."
+        )
         try:
             alerts = create_observed_inventory_alerts(clean, dataset.inventory)
             if alerts.empty:
@@ -384,14 +420,27 @@ def show_inventory_page(clean: pd.DataFrame, dataset: MendeleyDataset | None = N
             st.error(f"No se pudieron calcular alertas con inventario observado: {exc}")
         st.caption("Una existencia negativa o igual a cero se marca para revisión. La comparación con una media de ventas solo indica riesgo orientativo; no confirma una rotura de stock, no modela plazos y la ficha describe una muestra estratificada.")
     with manual_tab:
-        st.caption("En esta alternativa, el stock se ingresa por producto y se contrasta con la demanda agregada entre tiendas; úsala si quieres proporcionar una existencia total manual.")
+        st.caption("Ingresa la existencia actual por producto. En este modo la demanda se agrega entre tiendas, así que el stock debe representar un total comparable.")
         show_manual_inventory_page(clean)
 
 
 def show_manual_inventory_page(clean: pd.DataFrame) -> None:
-    st.subheader("Alertas orientativas de inventario")
-    st.info("Ingresa o importa el stock actual real. Online Retail contiene ventas, pero no inventario histórico.")
+    render_section_intro(
+        "Stock manual",
+        "Importa o registra la existencia actual para comparar cada producto con su demanda semanal reciente.",
+    )
+    st.info(
+        "Ingresa o importa el stock actual real. El código del producto debe coincidir con el de las ventas "
+        "y la cantidad debe ser finita, no negativa y comparable con las unidades vendidas."
+    )
     st.caption("La estimación es la media de las últimas cuatro semanas calendario hasta la última semana del archivo. Las semanas sin venta se cuentan como cero. Solo se alerta cuando la demanda estimada supera el stock actual.")
+    with st.expander("¿Qué datos debo ingresar?"):
+        st.markdown(
+            "- **StockCode:** código exacto del producto presente en las ventas.\n"
+            "- **Stock:** unidades disponibles ahora; debe ser finito y no negativo.\n"
+            "- **Ejemplo ficticio:** `StockCode=10002`, `Stock=20`. No representa inventario real."
+        )
+        st.caption("Si las ventas están agregadas entre varias tiendas, ingresa el stock total que corresponda a esa misma cobertura.")
     products = sorted(clean.StockCode.unique())
     template = pd.DataFrame({"StockCode": products, "Stock": [pd.NA] * len(products)})
     st.download_button("Descargar plantilla de stock", template.to_csv(index=False).encode("utf-8-sig"),
@@ -429,7 +478,7 @@ def show_manual_inventory_page(clean: pd.DataFrame) -> None:
 
 def show_report_page(clean: pd.DataFrame, origin_label: str, dataset_key: str,
                      dataset: MendeleyDataset | None = None) -> None:
-    st.subheader("Informe de resultados y limitaciones")
+    render_section_intro("Informe de resultados", "Resumen del origen, resultados disponibles en esta sesión y límites de interpretación.")
     st.write(f"Origen: **{origin_label}**. Filas procesadas: {len(clean):,}. Productos: {clean.StockCode.nunique():,}.")
     if dataset:
         sales_quality, inventory_quality = dataset.quality["sales"], dataset.quality["inventory"]
@@ -462,11 +511,18 @@ def show_report_page(clean: pd.DataFrame, origin_label: str, dataset_key: str,
         st.markdown("**Limitaciones:** ventas observadas no equivalen a demanda completa si hubo falta de stock; no hay inventario histórico; la alerta usa una media de cuatro semanas y no modela plazos, estacionalidad ni compras en tránsito; la evaluación de clasificación usa una sola división cronológica.")
 
 
-st.title("📦 StockSmart ML")
-st.caption("Análisis de ventas, demanda, segmentos de productos y reposición")
+st.markdown(
+    '<div class="app-brand"><div class="app-brand-mark" aria-hidden="true">S</div>'
+    '<div><h1 class="app-brand-title">StockSmart ML</h1>'
+    '<div class="app-brand-subtitle">Ventas, demanda e inventario en una sola vista</div></div></div>',
+    unsafe_allow_html=True,
+)
+st.markdown("<div class='app-top-rule'></div>", unsafe_allow_html=True)
 
 with st.sidebar:
+    st.markdown("<div class='sidebar-brand'>STOCKSMART <span>ML</span></div>", unsafe_allow_html=True)
     st.header("Datos de entrada")
+    st.caption("Selecciona cómo quieres iniciar el análisis.")
     source = st.radio("Origen", ["Demostración", "Dataset Mendeley", "Archivo propio"], key="data_source")
     uploaded = st.file_uploader("Subir CSV o Excel", type=["csv", "xlsx", "xlsm", "xls"], key="sales_upload") if source == "Archivo propio" else None
     mendeley_sales_upload = None
@@ -486,8 +542,18 @@ with st.sidebar:
     else:
         st.caption("La demo usa datos sintéticos reproducibles.")
     st.divider()
+    st.caption("SECCIONES")
     section = st.radio("Navegación", ["Panel principal", "Carga de datos", "Modelos de demanda",
                                        "Clustering", "Alertas de inventario", "Informe"], key="main_navigation")
+    section_descriptions = {
+        "Panel principal": "Indicadores y tendencia de ventas.",
+        "Carga de datos": "Archivo procesado y calidad de los datos.",
+        "Modelos de demanda": "Comparación cronológica de clasificadores.",
+        "Clustering": "Grupos y perfiles de productos.",
+        "Alertas de inventario": "Existencias observadas o stock ingresado.",
+        "Informe": "Resultados disponibles y limitaciones.",
+    }
+    st.caption(section_descriptions[section])
 
 try:
     dataset = None

@@ -1,0 +1,164 @@
+:root {
+  --ss-bg: #101715;
+  --ss-surface: #19221f;
+  --ss-surface-raised: #202c28;
+  --ss-border: #31413b;
+  --ss-accent: #62c6a4;
+  --ss-text: #e7efeb;
+  --ss-muted: #b1c0ba;
+}
+
+.stApp {
+  background: var(--ss-bg);
+  color: var(--ss-text);
+}
+
+main .block-container {
+  max-width: 1440px;
+  padding-top: 2rem;
+  padding-bottom: 3rem;
+}
+
+.app-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  margin: 0.2rem 0 1rem;
+}
+
+.app-brand-mark {
+  display: grid;
+  width: 3rem;
+  height: 3rem;
+  place-items: center;
+  border: 1px solid #4c8e77;
+  border-radius: 0.95rem;
+  background: #1b352c;
+  color: var(--ss-accent);
+  font-size: 1.35rem;
+  font-weight: 750;
+}
+
+.app-brand-title {
+  color: var(--ss-text);
+  font-size: clamp(1.55rem, 3vw, 2rem);
+  font-weight: 750;
+  letter-spacing: -0.035em;
+  line-height: 1.15;
+  margin: 0;
+}
+
+.app-brand-subtitle {
+  margin-top: 0.28rem;
+  color: var(--ss-muted);
+  font-size: 0.94rem;
+}
+
+.app-top-rule {
+  height: 1px;
+  margin: 0 0 1.4rem;
+  background: var(--ss-border);
+}
+
+.sidebar-brand {
+  margin: 0.25rem 0 1.2rem;
+  color: var(--ss-text);
+  font-size: 0.82rem;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+}
+
+.sidebar-brand span {
+  color: var(--ss-accent);
+}
+
+h1, h2, h3, h4 {
+  color: var(--ss-text);
+  letter-spacing: -0.02em;
+}
+
+h2, h3 {
+  margin-top: 1.25rem;
+}
+
+.stCaption, small {
+  color: var(--ss-muted);
+}
+
+.stMetric {
+  height: 100%;
+  padding: 0.95rem 1rem;
+  border: 1px solid var(--ss-border);
+  border-radius: 0.8rem;
+  background: var(--ss-surface);
+}
+
+.stMetric label {
+  color: var(--ss-muted);
+}
+
+.stMetric div {
+  color: var(--ss-text);
+}
+
+.stButton button, .stDownloadButton button {
+  min-height: 2.6rem;
+  border-radius: 0.65rem;
+  font-weight: 600;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.stDownloadButton button {
+  border-color: #477d69;
+}
+
+.stDownloadButton button:hover {
+  border-color: var(--ss-accent);
+  color: var(--ss-text);
+}
+
+.stTabs [role="tab"] {
+  min-height: 2.7rem;
+  color: var(--ss-muted);
+  font-weight: 600;
+}
+
+.stTabs [role="tab"][aria-selected="true"] {
+  color: var(--ss-accent);
+}
+
+.stDataFrame {
+  border: 1px solid var(--ss-border);
+  border-radius: 0.7rem;
+  overflow: hidden;
+}
+
+.stAlert {
+  border-radius: 0.75rem;
+}
+
+input, textarea, [role="combobox"] {
+  border-radius: 0.55rem;
+}
+
+a:focus-visible, button:focus-visible, input:focus-visible,
+textarea:focus-visible, [role="radio"]:focus-visible,
+[role="tab"]:focus-visible, [role="combobox"]:focus-visible {
+  outline: 3px solid var(--ss-accent) !important;
+  outline-offset: 2px;
+}
+
+@media (max-width: 700px) {
+  main .block-container {
+    padding: 1.1rem 1rem 2rem;
+  }
+
+  .app-brand-mark {
+    width: 2.55rem;
+    height: 2.55rem;
+  }
+
+  .stMetric {
+    padding: 0.75rem;
+  }
+}
