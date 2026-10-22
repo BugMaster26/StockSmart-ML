@@ -1,0 +1,37 @@
+# Python environments and compiled files
+__pycache__/
+*.py[cod]
+*.pyd
+.venv/
+venv/
+env/
+
+# Test, type-checker, and plotting caches
+.pytest_cache/
+.cache/
+cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.mplconfig/
+
+# Local credentials and Streamlit secrets
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+.streamlit/cache/
+
+# Local data and model artifacts (keep explanatory placeholders)
+data/*
+!data/README.md
+models/*
+!models/.gitkeep
+
+# Temporary and operating-system files
+*.log
+*.tmp
+*.bak
+Thumbs.db
+.DS_Store
