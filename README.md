@@ -2,7 +2,7 @@
 
 Aplicación académica en Python y Streamlit para explorar transacciones de ventas, clasificar demanda semanal, agrupar productos y generar alertas orientativas comparando demanda reciente con el stock actual ingresado por el usuario.
 
-> Prototipo académico: la demo utiliza datos sintéticos. El dataset Online Retail de UCI no está incluido en el repositorio. No se deben interpretar las métricas de la demo como resultados de una empresa o del dataset real.
+> Prototipo académico: la demo utiliza datos sintéticos. El dataset real de Mendeley descrito abajo todavía no está integrado ni incluido en el repositorio. No se deben interpretar las métricas de la demo como resultados del dataset real.
 
 ## Problema y alcance
 
@@ -66,7 +66,9 @@ No se requieren secretos de Streamlit ni variables de entorno para el funcionami
 
 ## Dataset
 
-La fuente sugerida es [Online Retail de UCI](https://archive.ics.uci.edu/dataset/352/online+retail), pero el archivo no está incluido. Carga un CSV, XLSX, XLSM o XLS con estas columnas exactas: `InvoiceDate`, `StockCode`, `Quantity`, `UnitPrice`. `InvoiceNo` es opcional para reconocer cancelaciones. La demo es sintética y reproducible.
+La fuente elegida para la siguiente integración es [Retail Transactions and Stocks Data](https://data.mendeley.com/datasets/27x8mjm8k4/1), versión 1, DOI [10.17632/27x8mjm8k4.1](https://doi.org/10.17632/27x8mjm8k4.1). Mendeley publica los archivos `retail_sales_ml_apl.csv` (37.3 MB) y `retail_inventory_ml_apl.csv` (95.4 MB), y describe una muestra de 40 tiendas, 2,326 SKU y tres divisiones. La ficha indica ventas transaccionales diarias y stock disponible (“On hand”), pero no se han podido verificar las columnas, el periodo de observaciones, la granularidad exacta del inventario ni la relación temporal entre ambos archivos. Por ello, esta versión todavía no integra el dataset real ni genera resultados basados en él.
+
+Para preparar una inspección local, descarga ambos CSV desde **Download All** en la ficha oficial y colócalos en `data/raw/` con esos nombres exactos. Esa carpeta y sus archivos están excluidos de Git; no subas los CSV a GitHub. Tras inspeccionarlos se podrá establecer un mapeo de columnas y validar fechas, claves y reglas de limpieza antes de habilitar su uso. Mientras tanto, la aplicación conserva su modo de demostración y la carga genérica actual, cuyo esquema requerido es `InvoiceDate`, `StockCode`, `Quantity` y `UnitPrice`; no se afirma que los archivos Mendeley tengan esas columnas.
 
 ## Estructura
 
@@ -103,14 +105,15 @@ Resultados y limitaciones del entorno usado para auditoría: ver [Documentación
 
 ## Limitaciones conocidas
 
-No hay ventas reales incluidas, evaluación empresarial, validación temporal repetida ni guardado/carga de modelos. Ventas observadas pueden ocultar demanda durante quiebres. La clasificación usa una sola partición cronológica y clases relativas a cuantiles. La alerta no considera estacionalidad, plazos de entrega, compras en tránsito ni stock de seguridad. K se escoge manualmente. La tabla `data/README.md` describe incorrectamente `UnitPrice` como opcional; el código la requiere.
+El dataset de Mendeley está seleccionado, pero su esquema y periodo aún no se han inspeccionado y no está integrado. No hay ventas reales incluidas, evaluación empresarial, validación temporal repetida ni guardado/carga de modelos. Ventas observadas pueden ocultar demanda durante quiebres. La clasificación usa una sola partición cronológica y clases relativas a cuantiles. La alerta actual no considera estacionalidad, plazos de entrega, compras en tránsito ni stock de seguridad; compara ventas recientes con stock ingresado manualmente. K se escoge manualmente.
 
 ## Créditos y licencia
 
-La fuente sugerida para datos es Online Retail, del UCI Machine Learning Repository; el archivo no se distribuye con este proyecto. No se ha definido una licencia para el código y no se incluye `LICENSE`. La publicación permite consultar el repositorio, pero no concede por sí misma permisos de copia, modificación o redistribución. La persona titular debe elegir una licencia antes de otorgar esos permisos.
+La fuente objetivo para datos es [Retail Transactions and Stocks Data](https://data.mendeley.com/datasets/27x8mjm8k4/1), de Jimmy Smith, versión 1 (2026), DOI [10.17632/27x8mjm8k4.1](https://doi.org/10.17632/27x8mjm8k4.1). La ficha declara CC BY 4.0; si se usan esos datos, se debe conservar la atribución y señalar modificaciones. Los CSV no se incluyen en este repositorio. No se ha definido una licencia para el código y no se incluye `LICENSE`; la visibilidad pública del repositorio no concede por sí sola permisos de copia, modificación o redistribución del código.
 
 ## Documentación
 
+- [Datos y pasos para la integración pendiente](data/README.md)
 - [Informe académico](docs/INFORME_ACADEMICO.md)
 - [Documentación técnica](docs/DOCUMENTACION_TECNICA.md)
 - [Metodología de Machine Learning](docs/METODOLOGIA_MACHINE_LEARNING.md)
