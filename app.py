@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import hashlib
 import io
+import logging
+import time
 import zipfile
 from pathlib import Path
 
@@ -19,6 +21,7 @@ from src.preprocessing import clean_transactions, make_demo_data
 
 
 st.set_page_config(page_title="StockSmart ML", page_icon="📦", layout="wide")
+logger = logging.getLogger(__name__)
 
 
 @st.cache_data(show_spinner=False)
@@ -42,12 +45,12 @@ def cached_clean_transactions(frame: pd.DataFrame):
     return clean_transactions(frame)
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=1)
 def cached_weekly_features(frame: pd.DataFrame, low_quantile: float, high_quantile: float):
     return build_weekly_features(frame, low_quantile, high_quantile)
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=1)
 def cached_model_evaluation(features: pd.DataFrame, low_quantile: float, high_quantile: float):
     return evaluate_models(features, low_quantile=low_quantile, high_quantile=high_quantile)
 
@@ -61,14 +64,34 @@ def cached_segmentation(frame: pd.DataFrame, n_clusters: int):
 def cached_mendeley_local(sales_path: str, sales_size: int, sales_mtime: int,
                           inventory_path: str, inventory_size: int, inventory_mtime: int):
     """Cachea por tamaño/mtime para evitar releer los CSV en cada interacción."""
-    return load_mendeley_dataset(sales_path, inventory_path)
+    logger.info("Mendeley load started: mode=local sales_bytes=%d inventory_bytes=%d",
+                sales_size, inventory_size)
+    started = time.perf_counter()
+    try:
+        dataset = load_mendeley_dataset(sales_path, inventory_path)
+    except Exception:
+        logger.exception("Mendeley load failed: mode=local")
+        raise
+    logger.info("Mendeley load completed: mode=local seconds=%.2f sales_rows=%d inventory_rows=%d",
+                time.perf_counter() - started, len(dataset.sales), len(dataset.inventory))
+    return dataset
 
 
 @st.cache_data(show_spinner=False, max_entries=1)
 def cached_mendeley_upload(sales_name: str, sales_bytes: bytes,
                            inventory_name: str, inventory_bytes: bytes):
     """Cachea la importación conjunta de archivos Mendeley cargados en sesión."""
-    return load_mendeley_dataset(sales_bytes, inventory_bytes)
+    logger.info("Mendeley load started: mode=upload sales_bytes=%d inventory_bytes=%d",
+                len(sales_bytes), len(inventory_bytes))
+    started = time.perf_counter()
+    try:
+        dataset = load_mendeley_dataset(sales_bytes, inventory_bytes)
+    except Exception:
+        logger.exception("Mendeley load failed: mode=upload")
+        raise
+    logger.info("Mendeley load completed: mode=upload seconds=%.2f sales_rows=%d inventory_rows=%d",
+                time.perf_counter() - started, len(dataset.sales), len(dataset.inventory))
+    return dataset
 
 
 def show_panel(clean: pd.DataFrame, report, origin_label: str, dataset: MendeleyDataset | None = None) -> None:
@@ -216,35 +239,72 @@ def show_models_page(clean: pd.DataFrame, dataset_key: str) -> None:
     st.markdown("El objetivo es la demanda de la semana siguiente. Rezagos, promedio, variabilidad y tendencia "
                 "se calculan con semanas observadas antes del objetivo.")
     low_pct, high_pct = st.slider("Percentiles para separar clases baja, media y alta", 0, 100, (33, 67), key="demand_thresholds")
+    stage = "weekly_feature_generation"
     try:
+        logger.info("Demand page stage started: stage=%s input_rows=%d input_columns=%d",
+                    stage, len(clean), len(clean.columns))
+        started = time.perf_counter()
         features, thresholds = cached_weekly_features(clean, low_pct / 100, high_pct / 100)
+        logger.info(
+            "Demand page stage completed: stage=%s seconds=%.2f rows=%d columns=%d "
+            "missing_cells=%d dataframe_mib=%.2f",
+            stage, time.perf_counter() - started, len(features), len(features.columns),
+            int(features.isna().sum().sum()), features.memory_usage(deep=True).sum() / 1024**2,
+        )
         st.caption(f"Límites descriptivos globales: baja ≤ {thresholds['bajo']:.1f}; "
                    f"media ≤ {thresholds['alto']:.1f}; alta > {thresholds['alto']:.1f} unidades.")
         if features.empty or features.Demand.nunique() < 2:
             st.warning("Datos insuficientes para evaluar clasificadores. Se necesitan historial semanal y variación de demanda.")
             return
+        stage = "model_evaluation"
+        logger.info("Demand page stage started: stage=%s feature_rows=%d feature_columns=%d",
+                    stage, len(features), len(features.columns))
+        started = time.perf_counter()
         with st.spinner("Entrenando y evaluando KNN, Árbol de Decisión y MLP…"):
             result = cached_model_evaluation(features, low_pct / 100, high_pct / 100)
+        logger.info("Demand page stage completed: stage=%s seconds=%.2f result_rows=%d",
+                    stage, time.perf_counter() - started, len(result["metrics"]))
         if result["metrics"].empty:
             st.warning(result["warning"])
             return
         st.session_state["model_report"] = {"dataset_key": dataset_key, "result": result}
+        stage = "metrics_table_render"
+        logger.info("Demand page stage started: stage=%s metric_rows=%d metric_columns=%d",
+                    stage, len(result["metrics"]), len(result["metrics"].columns))
         st.dataframe(result["metrics"].style.format({c: "{:.3f}" for c in result["metrics"].columns if c != "Modelo"}),
                      hide_index=True, width="stretch")
+        logger.info("Demand page stage completed: stage=%s", stage)
         if result["warning"]:
+            stage = "evaluation_warning_render"
             st.warning(result["warning"])
+        stage = "selected_model_render"
         st.success(f"Mayor F1 macro en esta partición: {result['selected']}")
+        stage = "confusion_matrix_selector"
+        logger.info("Demand page stage started: stage=%s available_matrices=%d",
+                    stage, len(result["confusion"]))
         selected = st.selectbox("Matriz de confusión", list(result["confusion"]), key="confusion_model")
+        logger.info("Demand page stage completed: stage=%s selected=%s", stage, selected)
+        stage = "confusion_matrix_render"
         st.dataframe(result["confusion"][selected], width="stretch")
+        logger.info("Demand page stage completed: stage=%s", stage)
+        stage = "metrics_csv_export"
+        logger.info("Demand page stage started: stage=%s", stage)
         st.download_button("Descargar métricas CSV", result["metrics"].to_csv(index=False).encode("utf-8-sig"),
                            "metricas_modelos.csv", "text/csv")
+        logger.info("Demand page stage completed: stage=%s", stage)
+        stage = "temporal_summary_render"
         st.caption(f"Corte cronológico por semana: entrenamiento hasta {result['train_last_week'].date()}, "
                    f"prueba desde {result['test_first_week'].date()} ({result['train_rows']} filas de entrenamiento, "
                    f"{result['test_rows']} de prueba). Los límites usados en la evaluación se calculan solo con entrenamiento "
                    f"(bajo ≤ {result['thresholds']['bajo']:.1f}; medio ≤ {result['thresholds']['alto']:.1f}). "
                    "La selección depende de una única ventana temporal y no garantiza generalización.")
+        logger.info("Demand page stage completed: stage=%s", stage)
     except ValueError as exc:
+        logger.exception("Demand page failed: stage=%s", stage)
         st.error(f"No se pudo evaluar la demanda: {exc}")
+    except Exception:
+        logger.exception("Demand page crashed: stage=%s", stage)
+        raise
 
 
 def show_clustering_page(clean: pd.DataFrame) -> None:
